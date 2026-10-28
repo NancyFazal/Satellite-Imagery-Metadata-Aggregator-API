@@ -1,22 +1,41 @@
 import asyncio
+import logging
 import time
+from turtle import delay
 from fastapi import FastAPI
 
 app = FastAPI(title = "Satellite Metadata API")
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 async def fetch_satellite_metadata(name:str, delay:float):
-  print(f"Starting fetch: {name}")
+  logger.info("Fetching metadata for %s", name)
 
-  await asyncio.sleep(delay)
+  try:
+    await asyncio.sleep(delay)
 
-  print(f"Completed fetch: {name}")
+    if name == "Sentinel-2":
+      raise RuntimeError("Simulated satellite service failure")
 
-  return{
-    "satellite": name,
-    "status": "available",
-    "processing_time": delay
-  }
+    return {
+      "satellite": name,
+      "status": "available",
+      "metadata":{
+        "product_type": "satellite_imagery"
+      }
+    }
+  except asyncio.CancelledError:
+    logger.warning("Request cancelled for %s", name)
+    raise
+  except Exception as exc:
+    logger.error("Failed to fetch %s: %s", name, exc)
 
+    return {
+      "satellite": name,
+      "status": "error",
+      "error": str(exc)
+    }
 @app.get("/")
 async def root():
   return {"message": "Satellite Metadata API is running"}
@@ -25,12 +44,20 @@ async def root():
 async def get_satellite_metadata():
   start = time.perf_counter()
 
-  results = await asyncio.gather(
-    fetch_satellite_metadata("Sentinel-1", 3),
-    fetch_satellite_metadata("Sentinel-2", 2),
-    fetch_satellite_metadata("Landsat-9", 1),
-    fetch_satellite_metadata("TerraSAR-X", 4),
-  )
+  satellites = [
+    ("Sentinel-1", 3),
+    ("Sentinel-2", 2),
+    ("Landsat-9", 1)
+  ]
+
+  async with asyncio.TaskGroup() as group:
+    tasks = [
+      group.create_task(
+        fetch_satellite_metadata(name, delay)
+      )
+      for name, delay in satellites
+    ]
+  results = [task.result() for task in tasks]
 
   elapsed = time.perf_counter() - start
 
